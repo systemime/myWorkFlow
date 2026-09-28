@@ -1,0 +1,8 @@
+{
+  "name": "my-workflow",
+  "description": "First-search gate for Claude Code: forces one graphify graph query before any code search (Grep/Glob/rg), forces rg over grep with automatic grep fallback when rg is absent, and warns once per conversation when the graph is stale relative to git history.",
+  "version": "1.0.0",
+  "author": {
+    "name": "OwO"
+  }
+}

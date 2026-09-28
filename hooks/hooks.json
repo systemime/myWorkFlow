@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/search-gate.js\" bash"
+        }]
+      },
+      {
+        "matcher": "Grep|Glob",
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/search-gate.js\" file"
+        }]
+      },
+      {
+        "matcher": "mcp__graphify.*",
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/search-gate.js\" graphify"
+        }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/search-gate.js\" session"
+        }]
+      }
+    ]
+  }
+}

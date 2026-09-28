@@ -1,0 +1,15 @@
+{
+  "name": "my-workflow-marketplace",
+  "description": "Personal workflow plugins: deterministic retrieval discipline via Claude Code hooks",
+  "owner": {
+    "name": "OwO"
+  },
+  "plugins": [
+    {
+      "name": "my-workflow",
+      "source": "./",
+      "description": "First-search gate: graphify query before code searches, rg over grep, graph staleness advisory",
+      "version": "1.0.0"
+    }
+  ]
+}
