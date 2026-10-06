@@ -18,9 +18,10 @@ function put(p, s) { mkdirp(path.dirname(p)); fs.writeFileSync(p, s); }
 function touch(p, when) { fs.utimesSync(p, when, when); }
 function has(cmd) { return spawnSync(cmd, ['--version'], { stdio: 'ignore' }).status === 0; }
 
-// 每个用例独立的 TMPDIR: 状态文件互不串台; GRAPHIFY_GATE 从继承环境里摘掉
+// 每个用例独立的 TMPDIR: 状态文件互不串台; GRAPHIFY_GATE 从继承环境里摘掉。
+// Windows 下 node os.tmpdir() 读 TEMP(TMPDIR/TMP 均被忽略, 实测), 故三个都设
 function run(mode, pl, cwd, tmp) {
-  const env = Object.assign({}, process.env, { TMPDIR: tmp });
+  const env = Object.assign({}, process.env, { TMPDIR: tmp, TEMP: tmp, TMP: tmp });
   delete env.GRAPHIFY_GATE;
   const r = spawnSync(process.execPath, [SCRIPT, mode], {
     cwd, input: JSON.stringify(pl || {}), encoding: 'utf8', env,
@@ -236,6 +237,46 @@ function skip(name, why) { skipped++; console.log('  skip  ' + name + '  (' + wh
   const a = search(t, d, 'K'); const b = search(t, d, 'K'); const c = search(t, d, 'K');
   check('K1 前两次拦', a.code === 2 && b.code === 2, 'codes=' + [a.code, b.code].join(','));
   check('K2 第三次放行', c.code === 0, 'code=' + c.code + ' ' + c.err);
+}
+
+// ---------- N. 资格(v5): 纯媒体目录不武装, 代码证据(≥2)才武装 ----------
+{
+  const t = caseTmp('N');
+  const media = path.join(t, 'media');
+  put(path.join(media, 'a.mp4'), 'x'); put(path.join(media, 'b.webp'), 'x');
+  put(path.join(media, 'c.mp3'), 'x'); put(path.join(media, 'meta.json'), '{}');
+
+  const r = search(t, media, 'N');
+  check('N1 纯媒体目录 rg 放行', r.code === 0 && r.err === '', 'code=' + r.code + ' ' + r.err);
+
+  const fr = run('file', { session_id: 'N', tool_input: { pattern: 'foo' } }, media, t);
+  check('N2 纯媒体目录 Grep 放行', fr.code === 0, 'code=' + fr.code + ' ' + fr.err);
+
+  const deep = path.join(media, 'user', '1', '作品');
+  put(path.join(deep, 'v.mp4'), 'x');
+  const dr = search(t, deep, 'N', 'rg foo .');
+  check('N3 媒体目录深处仍放行', dr.code === 0, 'code=' + dr.code + ' ' + dr.err);
+
+  const one = path.join(t, 'one');
+  put(path.join(one, 'only.py'), 'x');
+  const orr = search(t, one, 'N');
+  check('N4 单代码文件目录放行(单文件豁免)', orr.code === 0, 'code=' + orr.code + ' ' + orr.err);
+
+  const two = path.join(t, 'two');
+  put(path.join(two, 'a.py'), 'x'); put(path.join(two, 'b.ts'), 'x');
+  const tr = search(t, two, 'N');
+  check('N5 两个代码文件目录拦截', tr.code === 2, 'code=' + tr.code + ' ' + tr.err);
+
+  const mani = path.join(t, 'mani');
+  put(path.join(mani, 'package.json'), '{}'); put(path.join(mani, 'index.js'), 'x');
+  const mr = search(t, mani, 'N');
+  check('N6 清单+代码文件拦截', mr.code === 2, 'code=' + mr.code + ' ' + mr.err);
+
+  if (!has('rg')) skip('N7 媒体目录 grep→rg 仍强制', 'rg 不在 PATH');
+  else {
+    const gr = search(t, media, 'N', 'grep -rn foo .');
+    check('N7 媒体目录 grep→rg 仍强制', gr.code === 2 && /请改用 rg/.test(gr.err), 'code=' + gr.code + ' ' + gr.err);
+  }
 }
 
 console.log('\n' + (fail ? 'FAIL' : 'PASS') + ': ' + pass + ' passed, ' + fail + ' failed, ' + skipped + ' skipped');

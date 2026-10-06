@@ -1,4 +1,6 @@
-// search-gate.js v4
+// search-gate.js v5
+// v5: 资格收敛 — (本目录或父目录)git 仓库, 或浅层 ≥2 个「代码证据」(代码后缀文件/项目清单);
+//     旧「≥2 个任意文件」兜底会让几千 mp4 的纯媒体目录误武装(实测 F:\Douyin)
 // bash     → PreToolUse(Bash): ① grep→rg 强制(rg 缺失兜底) ② 拦截未完成首搜的检索
 //                              ③ graphify 图查询(CLI) = 首搜完成, 开闸并放行
 // file     → PreToolUse(Grep|Glob): 拦截未完成首搜的内置搜索工具
@@ -32,6 +34,25 @@ const SKILL = '~/.claude/skills/graphify/SKILL.md';
 const GIT_TIMEOUT = 5000;     // ms, git log / rev-parse
 const GIT_STATUS_TIMEOUT = 8000;
 const SCAN_LIMIT = 500;       // 过期检测逐文件比对 mtime 的上限条数
+
+// 代码证据(v5): 闸门只服务编码/脚本场景 — 浅层出现 ≥2 个代码后缀文件/项目清单才视为编码目录。
+// 刻意不收 .json/.yml/.md 泛后缀(媒体/资料目录也常见); .json 仅按清单文件名白名单收。
+const CODE_EXT = new Set(['py', 'pyi', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'go', 'rs',
+  'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'hh', 'cs', 'java', 'kt', 'kts', 'rb', 'php', 'swift',
+  'm', 'mm', 'lua', 'sh', 'bash', 'zsh', 'ps1', 'psm1', 'bat', 'cmd', 'sql', 'r', 'jl', 'dart',
+  'scala', 'clj', 'cljs', 'ex', 'exs', 'erl', 'hrl', 'hs', 'ml', 'mli', 'fs', 'fsx', 'vue',
+  'svelte', 'astro', 'html', 'htm', 'css', 'scss', 'less', 'sass', 'styl', 'v', 'sv', 'vhd',
+  'csproj', 'sln']);
+const MANIFEST = new Set(['package.json', 'pyproject.toml', 'cargo.toml', 'go.mod', 'pom.xml',
+  'build.gradle', 'build.gradle.kts', 'settings.gradle', 'cmakelists.txt', 'makefile', 'dockerfile',
+  'requirements.txt', 'composer.json', 'gemfile', 'rakefile']);
+
+function isCodeFile(name) {
+  const lower = name.toLowerCase();
+  if (MANIFEST.has(lower)) return true;
+  const dot = lower.lastIndexOf('.');
+  return dot > 0 && CODE_EXT.has(lower.slice(dot + 1));
+}
 
 const mode = process.argv[2];
 const cwd = process.cwd();
@@ -167,7 +188,10 @@ function maybeStaleWarning(st) {
        '若确认无需更新, 重试同一检索即可继续(本次对话结束前不再提醒)。');
 }
 
-// 资格: (本目录或任一父目录)是 git 仓库, 或本目录 ≥2 个文件
+// 资格: (本目录或任一父目录)是 git 仓库, 或本目录浅层有 ≥2 个代码证据(见 CODE_EXT/MANIFEST)。
+// 纯媒体/资料目录(仅 mp4/webp/文档等)不武装 —— graphify 首搜只服务编码/脚本场景。
+// 单代码文件目录维持放行(单文件豁免), 与旧版回归用例 I1 一致。
+// ponytail: 扫描上限 深度8/节点500; 更大非 git 目录慢时再加缓存
 function eligible() {
   let d = cwd;
   while (true) {
@@ -176,18 +200,19 @@ function eligible() {
     if (parent === d) break;
     d = parent;
   }
-  let n = 0;
-  const stack = [cwd];
-  while (stack.length && n < 2) {
-    const dir = stack.pop();
+  const MAX_DEPTH = 8, MAX_NODES = 500;
+  const stack = [[cwd, 0]];
+  let n = 0, visited = 0;
+  while (stack.length && visited < MAX_NODES) {
+    const [dir, depth] = stack.shift();
+    visited++;
     let es; try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { continue; }
     for (const e of es) {
-      if (e.isDirectory()) { if (!SKIP.has(e.name)) stack.push(path.join(dir, e.name)); }
-      else if (e.isFile()) n++;
-      if (n >= 2) break;
+      if (e.isDirectory()) { if (!SKIP.has(e.name) && depth < MAX_DEPTH) stack.push([path.join(dir, e.name), depth + 1]); }
+      else if (e.isFile() && isCodeFile(e.name) && ++n >= 2) return true;
     }
   }
-  return n >= 2;
+  return false;
 }
 
 function gateMsg(hasGraph) {
