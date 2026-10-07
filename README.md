@@ -10,13 +10,27 @@ Claude Code 插件：把「graphify 优先、rg 替代 grep」的检索纪律从
 
 ## 安装
 
+### 方式一：直接从 GitHub 安装（推荐）
+
 ```bash
 # Claude Code 会话内执行：
-/plugin marketplace add F:\Project\MyTool\myWorkFlow
+/plugin marketplace add systemime/myWorkFlow
 /plugin install my-workflow@my-workflow-marketplace
 ```
 
-装好后重启会话即生效。卸载用 `/plugin uninstall my-workflow`。CI / 无头场景设环境变量 `GRAPHIFY_GATE=off` 整体关闭。
+### 方式二：克隆到本地后安装
+
+```bash
+git clone https://github.com/systemime/myWorkFlow.git
+```
+
+```bash
+# Claude Code 会话内执行（把路径换成你的实际克隆位置）：
+/plugin marketplace add /path/to/myWorkFlow
+/plugin install my-workflow@my-workflow-marketplace
+```
+
+装好后重启会话即生效。卸载用 `/plugin uninstall my-workflow`（本地克隆方式可再 `/plugin marketplace remove my-workflow-marketplace`）。CI / 无头场景设环境变量 `GRAPHIFY_GATE=off` 整体关闭。
 
 ## 依赖
 
