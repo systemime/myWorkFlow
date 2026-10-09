@@ -277,6 +277,18 @@ function skip(name, why) { skipped++; console.log('  skip  ' + name + '  (' + wh
     const gr = search(t, media, 'N', 'grep -rn foo .');
     check('N7 媒体目录 grep→rg 仍强制', gr.code === 2 && /请改用 rg/.test(gr.err), 'code=' + gr.code + ' ' + gr.err);
   }
+
+  // v5.1: html/htm 不再作代码证据 — 文档库的报告/页面导出物不应触发建图(实测 GLB-DOC)
+  const doclib = path.join(t, 'doclib');
+  put(path.join(doclib, '报告一.html'), 'x'); put(path.join(doclib, '报告二.html'), 'x');
+  const dhr = search(t, doclib, 'N', 'rg foo .');
+  check('N8 纯 html 导出目录不武装', dhr.code === 0 && dhr.err === '', 'code=' + dhr.code + ' ' + dhr.err);
+
+  const web = path.join(t, 'web');
+  put(path.join(web, 'package.json'), '{}'); put(path.join(web, 'index.html'), 'x');
+  put(path.join(web, 'js', 'app.js'), 'x');
+  const wr = search(t, web, 'N');
+  check('N9 Web 项目(清单+js)仍武装', wr.code === 2, 'code=' + wr.code + ' ' + wr.err);
 }
 
 console.log('\n' + (fail ? 'FAIL' : 'PASS') + ': ' + pass + ' passed, ' + fail + ' failed, ' + skipped + ' skipped');

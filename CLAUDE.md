@@ -13,7 +13,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 | `search-gate.js` | 全部逻辑，四模式（bash / file / graphify / session） |
 | `hooks/hooks.json` | hook 接线：PreToolUse(Bash / Grep\|Glob / mcp__graphify.*) + SessionStart |
 | `.claude-plugin/plugin.json`、`marketplace.json` | 插件清单；**版本号两处需同步升** |
-| `test-search-gate.js` | 自检 27 用例，`node test-search-gate.js`，无框架无依赖 |
+| `test-search-gate.js` | 自检 29 用例，`node test-search-gate.js`，无框架无依赖 |
 | `README.md` | 用户向（功能 / 安装 / 依赖），不含开发细节 |
 | `CLAUDE.md` | 本文件，Agent 向 |
 
@@ -28,7 +28,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 ## 首搜闸机制
 
-- **资格（`eligible()`，v5 收敛）**：`.git` 存在于本目录或任一父目录（向上查找）；或本目录浅层出现 **≥2 个「代码证据」**——代码后缀文件（`CODE_EXT`：py/js/ts/go/rs/...）或项目清单（`MANIFEST`：package.json/pyproject.toml/Makefile/...）。扫描深度上限 8、节点上限 500，跳过 `SKIP`（33 类产物目录）。**单代码文件目录维持放行（单文件豁免，回归用例 I1）**。纯媒体/资料目录（仅 mp4/webp/文档等；实测 F:\Douyin 数千 mp4）不武装。刻意不收 `.json/.yml/.md` 泛后缀（媒体/资料目录也常见）；`.json` 仅按清单文件名白名单收。
+- **资格（`eligible()`，v5 收敛）**：`.git` 存在于本目录或任一父目录（向上查找）；或本目录浅层出现 **≥2 个「代码证据」**——代码后缀文件（`CODE_EXT`：py/js/ts/go/rs/...）或项目清单（`MANIFEST`：package.json/pyproject.toml/Makefile/...）。扫描深度上限 8、节点上限 500，跳过 `SKIP`（33 类产物目录）。**单代码文件目录维持放行（单文件豁免，回归用例 I1）**。纯媒体/资料目录（仅 mp4/webp/文档等；实测 F:\Douyin 数千 mp4）不武装。刻意不收 `.json/.yml/.md` 泛后缀（媒体/资料目录也常见）；`.json` 仅按清单文件名白名单收。**html/htm 也不收（v5.1，实测 GLB-DOC：12 个报告/页面导出误武装）**——Web 项目有 package.json 等清单兜底，不依赖 html 作证据；纯 html + 单清单目录只有 1 个证据，按单证据豁免放行。
 - **认图（`findGraph()`）**：从 cwd 逐级向上找**最近的**一张图，非 git 目录同样适用。同级有 `graphify-out/.graphify_root`（graphify 建图时记下的扫描根）时，要求 cwd 在该根之下才算数，避免把兄弟目录的图认成自己的；文件缺失时退回「存在即认」。
 - **拦截与开闸**：每次拦截对 `tool_input` MD5 指纹。开闸路径：① 一次图查询——CLI 读命令（query/path/explain/affected/god-nodes）或 MCP 查询（`mcp__graphify.*`），两条等价，且都要求图已存在（防空图绕过）；② 同一参数连续 `MAX_BLOCK = 3` 次被拦自动放行（逃生口，`degraded` 标记落盘）；换参数 = 新指纹，计数重置。`graphify update` 之类建图/维护命令不开闸。
 - **状态**：`<临时目录>/graphify-gate-<cwd md5 前12位>/<session_id>.json`，原子写（临时文件+rename）。按「项目 + 会话」两层隔离，同仓库多会话互不影响；SessionStart 删整个项目目录重新武装。**写不进去就不拦**（状态落不了盘时直接放行，否则重试计数凑不满会变永久拦截）；同理记不住 staleNagged 就不再提醒。
@@ -46,7 +46,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 - `MAX_BLOCK`：逃生口阈值，默认 3。
 - `SKIP`：资格扫描跳过的产物目录，默认 33 个。刻意不收 `packages`、`src` 这类常为真实源码的名字。
-- `CODE_EXT` / `MANIFEST`：代码证据白名单（v5）。需要让数据目录也触发时增后缀（如 `ipynb`）；判据是「≥2 个」，单个代码文件不武装。
+- `CODE_EXT` / `MANIFEST`：代码证据白名单（v5）。需要让数据目录也触发时增后缀（如 `ipynb`）；判据是「≥2 个」，单个代码文件不武装。html/htm 已剔除（v5.1，文档导出物撞库，实测 GLB-DOC）。
 - `MAX_DEPTH` / `MAX_NODES`（`eligible()` 内）：资格扫描深度与节点上限，默认 8 / 500。
 - `SCAN_LIMIT`：过期检测逐文件比对上限，默认 500。
 - `GIT_TIMEOUT` / `GIT_STATUS_TIMEOUT`：git 调用超时，默认 5s / 8s。
@@ -66,7 +66,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 ## 测试
 
-**自检（入库）：`node test-search-gate.js`** —— 27 用例，无框架无依赖（git 缺失跳过 git 用例，rg 缺失跳过 rg 用例）。用例组：
+**自检（入库）：`node test-search-gate.js`** —— 29 用例，无框架无依赖（git 缺失跳过 git 用例，rg 缺失跳过 rg 用例）。用例组：
 
 - A 非 git 子目录认得上层图；graphify query 开闸；查询后放行；非 git 不报过期
 - B `.graphify_root` 指向兄弟目录时不算自己的图
@@ -79,7 +79,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 - L 图就建在子目录里仍按仓库根比对路径（隔离测路径基准）
 - M 图在当前目录，未跟踪新文件报过期（隔离测 `-uall`）
 - I 单文件目录放行；J grep→rg 强制；K 同参连拦 3 次后放行（回归组）
-- N（v5 资格收敛）纯媒体目录 rg/Grep 放行、媒体目录深处仍放行、单代码文件放行、两个代码文件拦截、清单+代码文件拦截、媒体目录 grep→rg 仍强制
+- N（v5 资格收敛）纯媒体目录 rg/Grep 放行、媒体目录深处仍放行、单代码文件放行、两个代码文件拦截、清单+代码文件拦截、媒体目录 grep→rg 仍强制、纯 html 导出目录不武装（v5.1）、Web 项目（清单+js）仍武装
 
 测试 harness 注意：每个用例设独立临时目录（`TMPDIR` + `TEMP` + `TMP` 三件套——Windows 下 node `os.tmpdir()` 只认 `TEMP`，实测 TMPDIR/TMP 被忽略），状态文件互不串台。
 
@@ -101,9 +101,11 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 8. 状态写失败时重试计数永远凑不满 → 永久拦截。改为写不进去直接放行。
 9. 资格旧「≥2 个任意文件」兜底 → 数千 mp4 的纯媒体目录误武装（实测 F:\Douyin）。改为「≥2 个代码证据」（v5）。
 10. 测试 harness 在 Windows 上设 `TMPDIR` 不生效（node 只认 `TEMP`）→ 用例 H 状态写不通场景失配。改为三件套都设。
+11. 资格 v5 把 html/htm 计入代码证据 → 文档库的报告/页面导出物误武装（实测 GLB-DOC：12 个 html 导出 + 1 个 py，rg 首搜被拦要求建图）。html/htm 从 `CODE_EXT` 剔除（v5.1）；Web 项目由清单 + js/ts 等证据兜底。
 
 ## 版本历史
 
+- 1.2.1（v5.1）：html/htm 从代码证据剔除——文档库的报告/页面导出物（实测 GLB-DOC：12 个 html 导出 + 1 个 py）不再误武装；Web 项目由清单 + js/ts 兜底；新增 N8/N9（共 29 用例）。
 - 1.2.0（v5）：资格收敛为代码证据（≥2），纯媒体目录不再武装；新增 N 组 7 用例（共 27）；harness 修 Windows 临时目录；文档拆分 README（用户向）/ CLAUDE.md（Agent 向），删除 info.md。
 - 1.1.0：开闸认 CLI 读命令；认图向上 + `.graphify_root` 覆盖校验；状态按「项目 + 会话」；写不进放行；过期检测 `-uall` + 仓库根基准 + 排除 graphify 产物；20 用例入库。
 - 1.0.0：首版——首搜闸、rg 强制、新鲜度提醒。

@@ -9,7 +9,7 @@
       "name": "my-workflow",
       "source": "./",
       "description": "First-search gate: graphify query before code searches, rg over grep, graph staleness advisory",
-      "version": "1.2.0"
+      "version": "1.2.1"
     }
   ]
 }

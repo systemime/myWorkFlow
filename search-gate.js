@@ -37,11 +37,13 @@ const SCAN_LIMIT = 500;       // 过期检测逐文件比对 mtime 的上限条�
 
 // 代码证据(v5): 闸门只服务编码/脚本场景 — 浅层出现 ≥2 个代码后缀文件/项目清单才视为编码目录。
 // 刻意不收 .json/.yml/.md 泛后缀(媒体/资料目录也常见); .json 仅按清单文件名白名单收。
+// html/htm 不收(v5.1): 文档库常见报告/页面导出物(实测 GLB-DOC: 12 个 html 导出误武装,
+// 要求纯资料目录建图); Web 项目有 package.json 等清单兜底, 不依赖 html 作证据。
 const CODE_EXT = new Set(['py', 'pyi', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'go', 'rs',
   'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'hh', 'cs', 'java', 'kt', 'kts', 'rb', 'php', 'swift',
   'm', 'mm', 'lua', 'sh', 'bash', 'zsh', 'ps1', 'psm1', 'bat', 'cmd', 'sql', 'r', 'jl', 'dart',
   'scala', 'clj', 'cljs', 'ex', 'exs', 'erl', 'hrl', 'hs', 'ml', 'mli', 'fs', 'fsx', 'vue',
-  'svelte', 'astro', 'html', 'htm', 'css', 'scss', 'less', 'sass', 'styl', 'v', 'sv', 'vhd',
+  'svelte', 'astro', 'css', 'scss', 'less', 'sass', 'styl', 'v', 'sv', 'vhd',
   'csproj', 'sln']);
 const MANIFEST = new Set(['package.json', 'pyproject.toml', 'cargo.toml', 'go.mod', 'pom.xml',
   'build.gradle', 'build.gradle.kts', 'settings.gradle', 'cmakelists.txt', 'makefile', 'dockerfile',

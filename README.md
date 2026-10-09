@@ -41,7 +41,7 @@ git clone https://github.com/systemime/myWorkFlow.git
 ## 自检
 
 ```bash
-node test-search-gate.js   # 27 个用例，无框架无依赖（git / rg 缺失时跳过对应用例）
+node test-search-gate.js   # 29 个用例，无框架无依赖（git / rg 缺失时跳过对应用例）
 ```
 
 开发细节、行为规格、调参、测试记录见 [CLAUDE.md](CLAUDE.md)。
