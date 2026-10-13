@@ -226,6 +226,14 @@ function skip(name, why) { skipped++; console.log('  skip  ' + name + '  (' + wh
   else {
     const r = search(t, d, 'J', 'grep -rn foo .');
     check('J1 grep→rg 强制', r.code === 2 && /请改用 rg/.test(r.err), 'code=' + r.code + ' ' + r.err);
+
+    // 全路径/引号包裹的 grep 同样打回(实测 agent 用 /bin/grep 绕过)
+    const p1 = search(t, d, 'J', '/bin/grep -rn foo .');
+    check('J2 /bin/grep 也强制', p1.code === 2 && /请改用 rg/.test(p1.err), 'code=' + p1.code + ' ' + p1.err);
+    const p2 = search(t, d, 'J', '/usr/bin/egrep foo .');
+    check('J3 全路径 egrep 也强制', p2.code === 2 && /请改用 rg/.test(p2.err), 'code=' + p2.code + ' ' + p2.err);
+    const p3 = search(t, d, 'J', "sh -c 'grep -rn foo .'");
+    check('J4 引号内 grep 也强制', p3.code === 2 && /请改用 rg/.test(p3.err), 'code=' + p3.code + ' ' + p3.err);
   }
 }
 

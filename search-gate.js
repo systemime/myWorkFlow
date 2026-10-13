@@ -262,7 +262,9 @@ if (mode === 'session') {
 // ---------- bash: grep→rg 强制 + 图查询开闸 + 未完成首搜时拦截 ----------
 if (mode === 'bash') {
   const cmd = (payload().tool_input || {}).command || '';
-  const isGrep = /(^|[|;&\s])(e|f)?grep\b/.test(cmd);
+  // grep 前导还可能是路径分隔符/引号/子 shell 括号: /bin/grep、sh -c 'grep …'、(grep …)
+  // 同样是 grep 调用, 不能只认空白前导(实测 agent 用 /bin/grep 绕过 rg 强制)
+  const isGrep = /(^|[|;&\s/"'(])(e|f)?grep\b/.test(cmd);
   const isRgSearch = /(^|[|;&\s])rg\b/.test(cmd);
   // graphify 的读命令: query / path / explain / affected / god-nodes
   // (update / cluster-only / label / add / watch / install 是建图或维护, 不算首搜)

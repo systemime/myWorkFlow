@@ -13,7 +13,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 | `search-gate.js` | 全部逻辑，四模式（bash / file / graphify / session） |
 | `hooks/hooks.json` | hook 接线：PreToolUse(Bash / Grep\|Glob / mcp__graphify.*) + SessionStart |
 | `.claude-plugin/plugin.json`、`marketplace.json` | 插件清单；**版本号两处需同步升** |
-| `test-search-gate.js` | 自检 29 用例，`node test-search-gate.js`，无框架无依赖 |
+| `test-search-gate.js` | 自检 32 用例，`node test-search-gate.js`，无框架无依赖 |
 | `README.md` | 用户向（功能 / 安装 / 依赖），不含开发细节 |
 | `CLAUDE.md` | 本文件，Agent 向 |
 
@@ -21,7 +21,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 | 模式 | 触发 | 职责 |
 |------|------|------|
-| bash | PreToolUse(Bash) | grep/egrep/fgrep 打回换 rg（rg 缺失时放行兜底）；`graphify query\|path\|explain\|affected\|god-nodes` 视为完成首搜并开闸；拦截未完成首搜的 rg 搜索 |
+| bash | PreToolUse(Bash) | grep/egrep/fgrep 打回换 rg（含全路径 `/bin/grep`、引号包裹等变体；rg 缺失时放行兜底）；`graphify query\|path\|explain\|affected\|god-nodes` 视为完成首搜并开闸；拦截未完成首搜的 rg 搜索 |
 | file | PreToolUse(Grep\|Glob) | 拦截未完成首搜的内置搜索工具（Read 不拦，指名读文件自由）；pattern 含 graphify-out 的元数据检查豁免 |
 | graphify | PreToolUse(mcp__graphify.*) | 图存在时的 MCP 图查询 = 首搜完成 → 开闸；图不存在时放行调用但不开闸（防空图绕过） |
 | session | SessionStart | 清状态目录，新会话重新武装 |
@@ -66,7 +66,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 ## 测试
 
-**自检（入库）：`node test-search-gate.js`** —— 29 用例，无框架无依赖（git 缺失跳过 git 用例，rg 缺失跳过 rg 用例）。用例组：
+**自检（入库）：`node test-search-gate.js`** —— 32 用例，无框架无依赖（git 缺失跳过 git 用例，rg 缺失跳过 rg 用例）。用例组：
 
 - A 非 git 子目录认得上层图；graphify query 开闸；查询后放行；非 git 不报过期
 - B `.graphify_root` 指向兄弟目录时不算自己的图
@@ -102,9 +102,11 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 9. 资格旧「≥2 个任意文件」兜底 → 数千 mp4 的纯媒体目录误武装（实测 F:\Douyin）。改为「≥2 个代码证据」（v5）。
 10. 测试 harness 在 Windows 上设 `TMPDIR` 不生效（node 只认 `TEMP`）→ 用例 H 状态写不通场景失配。改为三件套都设。
 11. 资格 v5 把 html/htm 计入代码证据 → 文档库的报告/页面导出物误武装（实测 GLB-DOC：12 个 html 导出 + 1 个 py，rg 首搜被拦要求建图）。html/htm 从 `CODE_EXT` 剔除（v5.1）；Web 项目由清单 + js/ts 等证据兜底。
+12. grep 前导字符只认空白/管道等 → `/bin/grep`（前导 `/`）、`sh -c 'grep …'`（前导引号）不匹配 `isGrep`，agent 可借全路径调用绕过 rg 强制。前导字符类补 `/`、引号、`(`（v5.2）。
 
 ## 版本历史
 
+- 1.2.2（v5.2）：`/bin/grep` 等全路径/引号包裹的 grep 变体同样打回换 rg——`isGrep` 前导字符类补 `/` `'` `"` `(`；新增 J2/J3/J4（共 32 用例）。
 - 1.2.1（v5.1）：html/htm 从代码证据剔除——文档库的报告/页面导出物（实测 GLB-DOC：12 个 html 导出 + 1 个 py）不再误武装；Web 项目由清单 + js/ts 兜底；新增 N8/N9（共 29 用例）。
 - 1.2.0（v5）：资格收敛为代码证据（≥2），纯媒体目录不再武装；新增 N 组 7 用例（共 27）；harness 修 Windows 临时目录；文档拆分 README（用户向）/ CLAUDE.md（Agent 向），删除 info.md。
 - 1.1.0：开闸认 CLI 读命令；认图向上 + `.graphify_root` 覆盖校验；状态按「项目 + 会话」；写不进放行；过期检测 `-uall` + 仓库根基准 + 排除 graphify 产物；20 用例入库。
