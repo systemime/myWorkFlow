@@ -145,6 +145,11 @@ function skip(name, why) { skipped++; console.log('  skip  ' + name + '  (' + wh
   search(t, sub, 'F', 'graphify update .');
   const r = search(t, sub, 'F');
   check('F1 graphify update 不开闸', r.code === 2, 'code=' + r.code);
+
+  // v5.3: 全路径 graphify 读命令同样开闸(命令位置解析, 不再只看空白前导)
+  const q = search(t, sub, 'F', '/usr/local/bin/graphify query "x"');
+  const after = search(t, sub, 'F');
+  check('F2 全路径 graphify query 开闸', q.code === 0 && after.code === 0, 'codes=' + q.code + ',' + after.code);
 }
 
 // ---------- G. 两个会话的状态互不影响 ----------
@@ -235,6 +240,16 @@ function skip(name, why) { skipped++; console.log('  skip  ' + name + '  (' + wh
     const p3 = search(t, d, 'J', "sh -c 'grep -rn foo .'");
     check('J4 引号内 grep 也强制', p3.code === 2 && /请改用 rg/.test(p3.err), 'code=' + p3.code + ' ' + p3.err);
   }
+  // v5.3: 引号/参数里的 grep 不是检索命令, 不得打回
+  const q1 = search(t, d, 'J', 'git commit -m "use grep"');
+  check('J5 消息文本里的 grep 不误拦', q1.code === 0 && q1.err === '', 'code=' + q1.code + ' ' + q1.err);
+  const q2 = search(t, d, 'J', 'python grep.py');
+  check('J6 文件名 grep.py 不误拦', q2.code === 0 && q2.err === '', 'code=' + q2.code + ' ' + q2.err);
+  // v5.3: 命令位置解析也覆盖旧正则漏掉的前导(路径/引号)与 sh -c 递归
+  const q3 = search(t, d, 'J', '/usr/bin/rg foo .');
+  check('J7 全路径 rg 仍受首搜闸约束', q3.code === 2, 'code=' + q3.code + ' ' + q3.err);
+  const q4 = search(t, d, 'J', "sh -c 'rg foo .'");
+  check('J8 sh -c 里的 rg 仍受首搜闸约束', q4.code === 2, 'code=' + q4.code + ' ' + q4.err);
 }
 
 // ---------- K. 回归: 同一命令连拦 3 次后放行 ----------
@@ -297,6 +312,14 @@ function skip(name, why) { skipped++; console.log('  skip  ' + name + '  (' + wh
   put(path.join(web, 'js', 'app.js'), 'x');
   const wr = search(t, web, 'N');
   check('N9 Web 项目(清单+js)仍武装', wr.code === 2, 'code=' + wr.code + ' ' + wr.err);
+
+  // v5.3: Glob(path=graphify-out) 是元数据检查, 不是代码检索
+  const gr2 = run('file', { session_id: 'N', tool_input: { pattern: '*', path: 'graphify-out' } }, two, t);
+  check('N10 Glob 指向 graphify-out 时放行', gr2.code === 0, 'code=' + gr2.code + ' ' + gr2.err);
+
+  // v5.3: rg 作为普通参数时不是检索命令
+  const er = search(t, two, 'N', 'echo rg');
+  check('N11 参数里的 rg 不误拦', er.code === 0 && er.err === '', 'code=' + er.code + ' ' + er.err);
 }
 
 console.log('\n' + (fail ? 'FAIL' : 'PASS') + ': ' + pass + ' passed, ' + fail + ' failed, ' + skipped + ' skipped');

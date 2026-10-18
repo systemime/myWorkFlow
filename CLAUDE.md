@@ -13,7 +13,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 | `search-gate.js` | 全部逻辑，四模式（bash / file / graphify / session） |
 | `hooks/hooks.json` | hook 接线：PreToolUse(Bash / Grep\|Glob / mcp__graphify.*) + SessionStart |
 | `.claude-plugin/plugin.json`、`marketplace.json` | 插件清单；**版本号两处需同步升** |
-| `test-search-gate.js` | 自检 32 用例，`node test-search-gate.js`，无框架无依赖 |
+| `test-search-gate.js` | 自检 39 用例，`node test-search-gate.js`，无框架无依赖 |
 | `README.md` | 用户向（功能 / 安装 / 依赖），不含开发细节 |
 | `CLAUDE.md` | 本文件，Agent 向 |
 
@@ -66,7 +66,7 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 ## 测试
 
-**自检（入库）：`node test-search-gate.js`** —— 32 用例，无框架无依赖（git 缺失跳过 git 用例，rg 缺失跳过 rg 用例）。用例组：
+**自检（入库）：`node test-search-gate.js`** —— 39 用例，无框架无依赖（git 缺失跳过 git 用例，rg 缺失跳过 rg 用例）。用例组：
 
 - A 非 git 子目录认得上层图；graphify query 开闸；查询后放行；非 git 不报过期
 - B `.graphify_root` 指向兄弟目录时不算自己的图
@@ -103,9 +103,13 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 10. 测试 harness 在 Windows 上设 `TMPDIR` 不生效（node 只认 `TEMP`）→ 用例 H 状态写不通场景失配。改为三件套都设。
 11. 资格 v5 把 html/htm 计入代码证据 → 文档库的报告/页面导出物误武装（实测 GLB-DOC：12 个 html 导出 + 1 个 py，rg 首搜被拦要求建图）。html/htm 从 `CODE_EXT` 剔除（v5.1）；Web 项目由清单 + js/ts 等证据兜底。
 12. grep 前导字符只认空白/管道等 → `/bin/grep`（前导 `/`）、`sh -c 'grep …'`（前导引号）不匹配 `isGrep`，agent 可借全路径调用绕过 rg 强制。前导字符类补 `/`、引号、`(`（v5.2）。
+13. 检索命令用子串正则匹配 → 引号/参数里的同名词（`git commit -m "use grep"`、`python grep.py`、`echo rg`）被误拦；反过来 `/usr/bin/rg`、带引号的 rg 又漏拦。v5.3 改为命令位置词法解析（按未引号 `; & | ( )` 切段、看实际命令词、递归解析 `sh -c`）。
+14. `readState()` 直接返回 `JSON.parse` 结果 → 状态文件为 `null`/标量时 `st.open` 抛 TypeError。v5.3 校验必须是对象，否则按空状态处理。
+15. `enforceGate()` 先跑 `eligible()` 再读状态 → 已开闸后每次检索仍重扫最多 500 个目录。v5.3 先读状态，开闸即短路。
 
 ## 版本历史
 
+- 1.2.3（v5.3）：命令位置词法解析——引号/参数里的 grep/rg/graphify 不再误拦，`/usr/bin/rg`、带引号 rg、全路径 graphify 不再漏拦；Glob 的 `path` 指向 graphify-out 时豁免；状态文件损坏不崩溃；已开闸目录跳过资格重扫；新增 F2/J5-J8/N10-N11（共 39 用例）。
 - 1.2.2（v5.2）：`/bin/grep` 等全路径/引号包裹的 grep 变体同样打回换 rg——`isGrep` 前导字符类补 `/` `'` `"` `(`；新增 J2/J3/J4（共 32 用例）。
 - 1.2.1（v5.1）：html/htm 从代码证据剔除——文档库的报告/页面导出物（实测 GLB-DOC：12 个 html 导出 + 1 个 py）不再误武装；Web 项目由清单 + js/ts 兜底；新增 N8/N9（共 29 用例）。
 - 1.2.0（v5）：资格收敛为代码证据（≥2），纯媒体目录不再武装；新增 N 组 7 用例（共 27）；harness 修 Windows 临时目录；文档拆分 README（用户向）/ CLAUDE.md（Agent 向），删除 info.md。

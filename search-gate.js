@@ -1,4 +1,6 @@
-// search-gate.js v5
+// search-gate.js v5.3
+// v5.3: 只在「命令位置」识别 grep/rg/graphify — 引号/参数里的同名词不再误拦;
+//       状态文件损坏时按未开闸处理而不是崩溃; 已开闸时先读状态, 跳过每次检索的资格扫描
 // v5: 资格收敛 — (本目录或父目录)git 仓库, 或浅层 ≥2 个「代码证据」(代码后缀文件/项目清单);
 //     旧「≥2 个任意文件」兜底会让几千 mp4 的纯媒体目录误武装(实测 F:\Douyin)
 // bash     → PreToolUse(Bash): ① grep→rg 强制(rg 缺失兜底) ② 拦截未完成首搜的检索
@@ -88,8 +90,12 @@ function stateDir() {
 }
 function stateFile() { return path.join(stateDir(), sid() + '.json'); }
 function readState() {
-  try { return JSON.parse(fs.readFileSync(stateFile(), 'utf8')); }
-  catch (e) { return { open: false, last: null, repeat: 0 }; }
+  const empty = { open: false, last: null, repeat: 0 };
+  try {
+    const st = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
+    // 状态文件被截断/写坏时可能是 null 或标量, 直接当空状态, 避免 st.open 抛 TypeError
+    return (st && typeof st === 'object') ? st : empty;
+  } catch (e) { return empty; }
 }
 // 原子写(临时文件 + rename), 避免并发读到半截 JSON; 失败返回 false
 function writeState(st) {
@@ -225,12 +231,16 @@ function gateMsg(hasGraph) {
     + '(更换参数不算重试;同一命令连续 ' + MAX_BLOCK + ' 次被拦后自动放行)';
 }
 
+// 一次图查询(CLI 或 MCP) = 首搜完成 → 开闸
+function openGate() { writeState({ open: true, last: null, repeat: 0, ts: Date.now() }); }
+
 // 未完成首搜时拦截 + 参数校验: 同指纹连续重试才计入逃生口; 换参数计数重置。
 // 返回 true = 放行; 未完成首搜时 deny() 退出进程。
 function enforceGate(inputStr) {
-  if (!eligible()) return true;
+  // 先读状态: 已开闸的目录不必每次检索都重扫资格(最多 500 个目录)
   const st = readState();
   if (st.open) { maybeStaleWarning(st); return true; }
+  if (!eligible()) return true;
   const h = crypto.createHash('md5').update(inputStr).digest('hex');
   const repeat = (st.last === h) ? st.repeat + 1 : 1;
   if (repeat >= MAX_BLOCK) {
@@ -249,7 +259,7 @@ if (off === 'off' || off === '0' || off === 'false') allow();
 
 // ---------- graphify 图查询(MCP): 图存在才开闸(防空图查询绕过) ----------
 if (mode === 'graphify') {
-  if (graphExists()) writeState({ open: true, last: null, repeat: 0, ts: Date.now() });
+  if (graphExists()) openGate();
   allow();   // 图不存在时放行调用本身, 但不开闸 — 查询会自然报错, 模型转向建图
 }
 
@@ -259,23 +269,109 @@ if (mode === 'session') {
   allow();
 }
 
+// ---------- bash 命令词法: 只在「命令位置」识别 grep/rg/graphify ----------
+// 旧实现按子串正则匹配 " grep": `git commit -m "use grep"`、`python grep.py`、`echo grep`
+// 都被误判成检索命令打回。这里按未加引号的 ; & | ( ) 换行切段, 段内按引号/空白切词,
+// 只看每段实际执行的命令词(wrapper 后取被执行的命令); sh -c '…' 里的字符串递归解析。
+// ponytail: 轻量词法而非完整 shell 解析器; eval/反引号等动态求值不识别(与 awk/sed 同属已知边界)
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);
+const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', 'done', '!', '{', '}']);
+const WRAPPERS = new Set(['sudo', 'doas', 'env', 'command', 'exec', 'time', 'timeout', 'nohup',
+  'nice', 'ionice', 'stdbuf', 'xargs', 'busybox', 'wsl', 'npx', 'pnpx', 'bunx', 'uvx', 'pipx']);
+const GREPS = new Set(['grep', 'egrep', 'fgrep']);
+// graphify 的读命令: query / path / explain / affected / god-nodes
+// (update / cluster-only / label / add / watch / install 是建图或维护, 不算首搜)
+const GRAPH_READ_CMD = new Set(['query', 'path', 'explain', 'affected', 'god-nodes']);
+
+function baseName(w) {
+  const b = w.replace(/\\/g, '/').split('/').pop();
+  return b.replace(/\.(exe|cmd|bat|ps1)$/i, '');
+}
+
+// 切成简单命令的词数组; 引号内容保留为一个词, 以便 sh -c '<cmd>' 递归解析
+function segments(cmd) {
+  const out = [];
+  let words = [], word = '', quote = '';
+  const endWord = () => { if (word) words.push(word); word = ''; };
+  const endSeg = () => { endWord(); if (words.length) out.push(words); words = []; };
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quote) {
+      if (c === quote) quote = '';
+      else if (c === '\\' && quote === '"') word += cmd[++i] || '';
+      else word += c;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === '\\') { word += cmd[++i] || ''; continue; }
+    if (/[|;&()\n\r]/.test(c)) { endSeg(); continue; }
+    if (/\s/.test(c)) { endWord(); continue; }
+    word += c;
+  }
+  endSeg();
+  return out;
+}
+
+// 段内实际执行的命令词下标; 跳过 FOO=1 前缀、if/do 等关键字与 sudo/env/xargs 等 wrapper,
+// wrapper 后取第一个「像命令」的词(能处理 sudo -u root grep)
+const INTERESTING = new Set([...GREPS, 'rg', 'graphify', 'find', ...SHELLS]);
+function commandAt(words) {
+  let i = 0;
+  while (i < words.length && (KEYWORDS.has(words[i]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))) i++;
+  if (i < words.length && WRAPPERS.has(baseName(words[i]))) {
+    for (let j = i + 1; j < words.length; j++) {
+      if (!words[j].startsWith('-') && INTERESTING.has(baseName(words[j]))) return j;
+    }
+    return -1;
+  }
+  return i < words.length ? i : -1;
+}
+
+function classify(cmd, depth) {
+  const res = { grep: false, rg: false, graphQuery: false };
+  for (const words of segments(cmd)) {
+    const i = commandAt(words);
+    if (i < 0) continue;
+    const name = baseName(words[i]);
+    if (GREPS.has(name)) { res.grep = true; continue; }
+    if (name === 'rg') { res.rg = true; continue; }
+    // git grep / find -exec grep 仍是 grep 检索; 保留旧版的强制范围
+    if (name === 'git' && words[i + 1] === 'grep') { res.grep = true; continue; }
+    if (name === 'find') {
+      for (let j = i + 1; j < words.length - 1; j++) {
+        if (/^-(exec|execdir|ok)$/.test(words[j]) && GREPS.has(baseName(words[j + 1]))) res.grep = true;
+      }
+      continue;
+    }
+    if (name === 'graphify') {
+      if (GRAPH_READ_CMD.has(words[i + 1])) res.graphQuery = true;
+      continue;
+    }
+    // sh -c / bash -lc '<cmd>': 引号里的字符串本身是命令
+    if (SHELLS.has(name) && depth < 3) {
+      const k = words.findIndex((w, j) => j > i && /^-[A-Za-z]*c[A-Za-z]*$/.test(w));
+      if (k > i && words[k + 1] !== undefined) {
+        const sub = classify(words[k + 1], depth + 1);
+        res.grep = res.grep || sub.grep;
+        res.rg = res.rg || sub.rg;
+        res.graphQuery = res.graphQuery || sub.graphQuery;
+      }
+    }
+  }
+  return res;
+}
+
 // ---------- bash: grep→rg 强制 + 图查询开闸 + 未完成首搜时拦截 ----------
 if (mode === 'bash') {
   const cmd = (payload().tool_input || {}).command || '';
-  // grep 前导还可能是路径分隔符/引号/子 shell 括号: /bin/grep、sh -c 'grep …'、(grep …)
-  // 同样是 grep 调用, 不能只认空白前导(实测 agent 用 /bin/grep 绕过 rg 强制)
-  const isGrep = /(^|[|;&\s/"'(])(e|f)?grep\b/.test(cmd);
-  const isRgSearch = /(^|[|;&\s])rg\b/.test(cmd);
-  // graphify 的读命令: query / path / explain / affected / god-nodes
-  // (update / cluster-only / label / add / watch / install 是建图或维护, 不算首搜)
-  const isGraphQuery = /(^|[|;&\s])graphify(?:\.(?:exe|cmd|bat|ps1))?\s+(query|path|explain|affected|god-nodes)\b/.test(cmd);
-  if (isGraphQuery) {
-    if (graphExists()) writeState({ open: true, last: null, repeat: 0, ts: Date.now() });
+  const c = classify(cmd, 0);
+  if (c.graphQuery) {
+    if (graphExists()) openGate();
     allow();
   }
-  if (!isGrep && !isRgSearch) allow();            // 非搜索命令(含 graphify 建图)直接放行
+  if (!c.grep && !c.rg) allow();                  // 非搜索命令(含 graphify 建图)直接放行
 
-  if (isGrep && spawnSync('rg', ['--version'], { stdio: 'ignore' }).status === 0) {
+  if (c.grep && spawnSync('rg', ['--version'], { stdio: 'ignore' }).status === 0) {
     deny('Blocked: 请改用 rg。');
   }
   enforceGate(cmd);
@@ -285,8 +381,10 @@ if (mode === 'bash') {
 // ---------- file: 内置 Grep/Glob 首搜拦截 ----------
 if (mode === 'file') {
   const ti = payload().tool_input || {};
-  // 元数据检查豁免: 查看/定位建图产物本身不算代码检索, 否则模型连"图是否存在"都无法确认
-  if (typeof ti.pattern === 'string' && /graphify-out|graph\.json/i.test(ti.pattern)) allow();
+  // 元数据检查豁免: 查看/定位建图产物本身不算代码检索, 否则模型连"图是否存在"都无法确认。
+  // Glob 用 path 指向 graphify-out 时 pattern 只是 '*'，所以 path 也要看。
+  const isMeta = (v) => typeof v === 'string' && /graphify-out|graph\.json/i.test(v);
+  if (isMeta(ti.pattern) || isMeta(ti.path)) allow();
   enforceGate(JSON.stringify(ti));                // 以 tool_input(pattern/path 等)做参数指纹
   allow();
 }
