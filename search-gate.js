@@ -1,4 +1,6 @@
-// search-gate.js v6.0
+// search-gate.js v6.1
+// v6.1: 新增 sleep 上限 —— 除非能够精确计算 sleep 时间,否则单次 sleep 不能超过 60 秒。
+//       命令前加 SLEEP_GATE=allow 显式声明精确等待时才放行。
 // v6: 删除首搜闸/图过期提醒 —— 「不建图就拦 rg」与 CLAUDE.md「rg 优先」直接冲突,
 //     文档评审等非编码 git 目录也被拦(实测)。插件只保留 grep→rg 的工具路由强制,
 //     rg 永远放行; 状态目录/资格扫描/认图/过期检测/会话隔离随之全部移除。
@@ -6,8 +8,10 @@
 //       (`git commit -m "use grep"`、`python grep.py`、`echo rg`),
 //       /bin/grep、sh -c 'grep …' 等变体不漏拦(词法解析保留)。
 // bash → PreToolUse(Bash): grep/egrep/fgrep 一律打回换 rg; rg 缺失时放行兜底。
+//                         单次 sleep > 60 秒打回。
 //
 // 环境变量 GRAPHIFY_GATE=off|0|false 时整个插件放行(CI / 无头场景逃生口)
+// 环境变量 SLEEP_GATE=off|0|false 时只关闭 sleep 上限
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 
@@ -42,7 +46,7 @@ const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', 
 const WRAPPERS = new Set(['sudo', 'doas', 'env', 'command', 'exec', 'time', 'timeout', 'nohup',
   'nice', 'ionice', 'stdbuf', 'xargs', 'busybox', 'wsl', 'npx', 'pnpx', 'bunx', 'uvx', 'pipx']);
 const GREPS = new Set(['grep', 'egrep', 'fgrep']);
-const INTERESTING = new Set([...GREPS, 'find', ...SHELLS]);
+const INTERESTING = new Set([...GREPS, 'find', 'sleep', ...SHELLS]);
 
 function baseName(w) {
   const b = w.replace(/\\/g, '/').split('/').pop();
@@ -65,6 +69,11 @@ function segments(cmd) {
     }
     if (c === '"' || c === "'") { quote = c; continue; }
     if (c === '\\') { word += cmd[++i] || ''; continue; }
+    if (c === '#' && (i === 0 || /\s/.test(cmd[i - 1]))) {
+      while (i < cmd.length && cmd[i] !== '\n') i++;
+      endSeg();
+      continue;
+    }
     if (/[|;&()\n\r]/.test(c)) { endSeg(); continue; }
     if (/\s/.test(c)) { endWord(); continue; }
     word += c;
@@ -87,34 +96,80 @@ function commandAt(words) {
   return i < words.length ? i : -1;
 }
 
-// 命令里是否存在「命令位置」上的 grep/egrep/fgrep
-// (含 git grep、find -exec grep、sh -c 递归; 全路径 /bin/grep 同样命中)
-function hasGrep(cmd, depth) {
+// 遍历所有「命令位置」, visit(name, words, i) 返回 true 即停止
+// (含 git grep、find -exec、sh -c 递归; 全路径 /bin/grep 同样命中)
+function walk(cmd, depth, visit) {
   for (const words of segments(cmd)) {
     const i = commandAt(words);
     if (i < 0) continue;
     const name = baseName(words[i]);
-    if (GREPS.has(name)) return true;
-    // git grep / find -exec grep 仍是 grep 检索
-    if (name === 'git' && words[i + 1] === 'grep') return true;
+    if (visit(name, words, i)) return true;
+    if (name === 'git' && words[i + 1] === 'grep' && visit('grep', words, i + 1)) return true;
     if (name === 'find') {
       for (let j = i + 1; j < words.length - 1; j++) {
-        if (/^-(exec|execdir|ok)$/.test(words[j]) && GREPS.has(baseName(words[j + 1]))) return true;
+        if (/^-(exec|execdir|ok)$/.test(words[j]) && visit(baseName(words[j + 1]), words, j + 1)) return true;
       }
       continue;
     }
     // sh -c / bash -lc '<cmd>': 引号里的字符串本身是命令
     if (SHELLS.has(name) && depth < 3) {
       const k = words.findIndex((w, j) => j > i && /^-[A-Za-z]*c[A-Za-z]*$/.test(w));
-      if (k > i && words[k + 1] !== undefined && hasGrep(words[k + 1], depth + 1)) return true;
+      if (k > i && words[k + 1] !== undefined && walk(words[k + 1], depth + 1, visit)) return true;
     }
   }
   return false;
 }
 
-// ---------- bash: grep→rg 强制(rg 永远放行, 无首搜闸) ----------
+function hasGrep(cmd, depth) {
+  return walk(cmd, depth, (name) => GREPS.has(name));
+}
+
+// ---------- sleep 上限: 除非能精确算出等待时间, 单次 sleep 不超过 60 秒 ----------
+const SLEEP_LIMIT = 60;
+
+// "90" / "1m" / "1m30s" / "1.5h" → 秒; 无法完整解析返回 null
+function secondsOf(word) {
+  const MULT = { s: 1, m: 60, h: 3600, d: 86400 };
+  const re = /(\d+(?:\.\d+)?)([smhd]?)/gi;
+  let total = 0, consumed = '', m;
+  while ((m = re.exec(word))) {
+    consumed += m[0];
+    total += parseFloat(m[1]) * MULT[(m[2] || 's').toLowerCase()];
+  }
+  return consumed === word && total > 0 ? total : null;
+}
+
+// sleep 参数里出现变量/命令替换等算不出的值时返回 null(放行, 不误拦)
+function sleepSeconds(words, i) {
+  let total = 0;
+  for (let j = i + 1; j < words.length; j++) {
+    const w = words[j];
+    if (w.startsWith('-') || /^\d*[<>]/.test(w)) continue;   // 选项 / 重定向
+    const s = secondsOf(w);
+    if (s === null) return null;
+    total += s;
+  }
+  return total;
+}
+
+function oversleep(cmd, depth) {
+  return walk(cmd, depth, (name, words, i) => {
+    if (name !== 'sleep') return false;
+    // 精确等待例外: 命令前显式声明 SLEEP_GATE=allow
+    for (let j = 0; j < i; j++) if (/^SLEEP_GATE=allow$/i.test(words[j])) return false;
+    const s = sleepSeconds(words, i);
+    return s !== null && s > SLEEP_LIMIT;
+  });
+}
+
+// ---------- bash: grep→rg 强制(rg 永远放行, 无首搜闸) + sleep 上限 ----------
 if (mode === 'bash') {
   const cmd = (payload().tool_input || {}).command || '';
+  const sleepOff = ['off', '0', 'false'].includes((process.env.SLEEP_GATE || '').toLowerCase());
+  if (!sleepOff && oversleep(cmd, 0)) {
+    deny('Blocked: 除非能够精确计算 sleep 时间，否则单次 sleep 时间不能超过 60 秒。'
+      + '改用不超过 60 秒的 sleep 循环；确实需要精确等待更久时，在命令前加 SLEEP_GATE=allow 声明。');
+  }
   if (hasGrep(cmd, 0) && spawnSync('rg', ['--version'], { stdio: 'ignore' }).status === 0) {
     deny('Blocked: 请改用 rg。');
   }

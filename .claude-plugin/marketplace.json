@@ -1,6 +1,6 @@
 {
   "name": "my-workflow-marketplace",
-  "description": "Personal workflow plugins: deterministic retrieval discipline via Claude Code hooks",
+  "description": "Personal workflow plugins: deterministic tool-routing and sleep discipline via Claude Code hooks",
   "owner": {
     "name": "OwO"
   },
@@ -8,8 +8,8 @@
     {
       "name": "my-workflow",
       "source": "./",
-      "description": "Forces rg over grep in Bash (incl. full-path/quoted/sh -c variants), automatic grep fallback when rg is absent",
-      "version": "1.3.0"
+      "description": "Forces rg over grep in Bash (incl. full-path/quoted/sh -c variants), automatic grep fallback when rg is absent; rejects single sleeps over 60 seconds unless SLEEP_GATE=allow is declared",
+      "version": "1.4.0"
     }
   ]
 }

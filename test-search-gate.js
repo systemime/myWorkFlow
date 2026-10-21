@@ -12,10 +12,11 @@ let pass = 0, fail = 0, skipped = 0;
 
 function has(cmd) { return spawnSync(cmd, ['--version'], { stdio: 'ignore' }).status === 0; }
 
-// GRAPHIFY_GATE 从继承环境里摘掉; extra 可注入环境变量
+// GRAPHIFY_GATE / SLEEP_GATE 从继承环境里摘掉; extra 可注入环境变量
 function run(cmd, extra) {
   const env = Object.assign({}, process.env);
   delete env.GRAPHIFY_GATE;
+  delete env.SLEEP_GATE;
   if (extra) Object.assign(env, extra);
   const r = spawnSync(process.execPath, [SCRIPT, 'bash'], {
     cwd: ROOT, input: JSON.stringify({ tool_input: { command: cmd } }), encoding: 'utf8', env,
@@ -28,6 +29,8 @@ function check(name, cond, detail) {
 }
 function skip(name, why) { skipped++; console.log('  skip  ' + name + '  (' + why + ')'); }
 const forced = (r) => r.code === 2 && /请改用 rg/.test(r.err);
+const sleepBlocked = (r) => r.code === 2 && /60 秒/.test(r.err);
+const allowed = (r) => r.code === 0 && r.err === '';
 
 // ---------- J. grep→rg 强制(v5.2/v5.3 词法回归组) ----------
 if (!has('rg')) {
@@ -57,6 +60,28 @@ if (!has('rg')) {
   const e1 = run('grep -rn foo .', { GRAPHIFY_GATE: 'off' });
   check('E1 GRAPHIFY_GATE=off 放行', e1.code === 0 && e1.err === '', e1.code + ' ' + e1.err);
 }
+
+// ---------- S. sleep 上限(v6.1) ----------
+const s1 = run('sleep 90');
+check('S1 sleep 90 拦截', sleepBlocked(s1), s1.code + ' ' + s1.err);
+const s2 = run('sleep 1m30s');
+check('S2 sleep 1m30s 拦截', sleepBlocked(s2), s2.code + ' ' + s2.err);
+const s3 = run("sh -c 'sleep 90'");
+check('S3 引号内 sleep 90 拦截', sleepBlocked(s3), s3.code + ' ' + s3.err);
+const s4 = run('timeout 5 sleep 90');
+check('S4 wrapper 后的 sleep 90 拦截', sleepBlocked(s4), s4.code + ' ' + s4.err);
+const s5 = run('sleep 60');
+check('S5 sleep 60 放行(不超过 60 秒)', allowed(s5), s5.code + ' ' + s5.err);
+const s6 = run('sleep 30 && echo ok');
+check('S6 sleep 30 放行', allowed(s6), s6.code + ' ' + s6.err);
+const s7 = run('sleep 45 # 等 90 秒的注释');
+check('S7 注释里的时长不误拦', allowed(s7), s7.code + ' ' + s7.err);
+const s8 = run('git commit -m "sleep 90"');
+check('S8 提交消息里的 sleep 不误拦', allowed(s8), s8.code + ' ' + s8.err);
+const s9 = run('SLEEP_GATE=allow sleep 90');
+check('S9 显式声明精确等待时放行', allowed(s9), s9.code + ' ' + s9.err);
+const s10 = run('sleep 90', { SLEEP_GATE: 'off' });
+check('S10 SLEEP_GATE=off 放行', allowed(s10), s10.code + ' ' + s10.err);
 
 // ---------- 非 grep 命令不误拦(v5.3 词法回归组) ----------
 const j6 = run('git commit -m "use grep"');
