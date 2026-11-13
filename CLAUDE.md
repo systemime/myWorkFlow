@@ -4,9 +4,13 @@
 
 ## 项目定位
 
-Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-workflow`。单脚本 `search-gate.js` 承载全部逻辑，由 `hooks/hooks.json` 的 1 个 hook（PreToolUse:Bash）触发。目标：把「rg 替代 grep」的工具路由纪律和 sleep 时长上限做成确定性拦截。
+Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-workflow`。单脚本 `search-gate.js` 承载全部逻辑，由 `hooks/hooks.json` 的 2 个 hook（PreToolUse:Bash + Stop）触发。目标：把「rg 替代 grep」的检索约定、sleep 时长上限、输出禁用词、部署/合并授权边界做成确定性拦截。
 
 **sleep 上限**：除非能够精确计算 sleep 时间，否则单次 sleep 时间不能超过 60 秒。超时拦截；命令前加 `SLEEP_GATE=allow` 即视为已精确计算，放行。
+
+**输出禁用词**：回答文本含 `BANNED_WORDS`（默认「抽屉」「值错位」）即打回，要求删词重答。只扫最后一条 assistant 的 text 块——历史轮次不追打，工具参数里的同名词不算输出；`stop_hook_active=true` 放行避免循环；transcript 读不到放行兜底。
+
+**部署拦截**：`git push` / `git merge` / `docker restart` / `scp`、`rsync` 带远程目标 / `deploy.sh` 默认打回——这些动作属于对外变更，需用户明确授权。命令前加 `DEPLOY_GATE=allow` 放行。`ssh` 不拦（日常查状态/读日志大量使用）；`ssh host 'git push'` 这类引号内命令不递归解析（保守放行，见已知边界）。
 
 **rg 永远放行**——不要求建图、不要求任何前置操作。这是 1.3.0 的刻意取舍：旧版「首搜闸」（不建图就拦 rg）与用户 CLAUDE.md 的「文本搜索优先用 rg」直接冲突，文档评审等非编码 git 目录也被拦（实测），故整体移除。
 
@@ -25,7 +29,8 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 | 模式 | 触发 | 职责 |
 |------|------|------|
-| bash | PreToolUse(Bash) | grep/egrep/fgrep 打回换 rg（含全路径 `/bin/grep`、引号包裹、`sh -c` 递归、`git grep`、`find -exec grep`）；rg 缺失时放行兜底。单次 sleep > 60 秒打回（`SLEEP_GATE=allow` 前缀放行；算不出时长如变量则放行） |
+| bash | PreToolUse(Bash) | grep/egrep/fgrep 打回换 rg（含全路径 `/bin/grep`、引号包裹、`sh -c` 递归、`git grep`、`find -exec grep`）；rg 缺失时放行兜底。单次 sleep > 60 秒打回（`SLEEP_GATE=allow` 前缀放行；算不出时长如变量则放行）。部署类命令（git push/merge、docker restart、scp/rsync 远程目标、deploy.sh）打回（`DEPLOY_GATE=allow` 前缀放行） |
+| stop | Stop | 回答文本含禁用词打回重答；`WORDS_GATE=off` 关闭；`stop_hook_active` 放行 |
 
 ## grep 识别（命令位置词法解析，v5.3 保留）
 
@@ -39,6 +44,9 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 - `GRAPHIFY_GATE`（环境变量）：`off` / `0` / `false` 时整个插件放行（CI / 无头场景逃生口，含 grep→rg 强制一并关闭）。
 - `SLEEP_GATE`（环境变量）：`off` / `0` / `false` 时只关闭 sleep 上限；命令内的 `SLEEP_GATE=allow` 前缀声明单次精确等待。
+- `WORDS_GATE`（环境变量）：`off` / `0` / `false` 时只关闭输出禁用词。
+- `DEPLOY_GATE`（环境变量）：`off` / `0` / `false` 时关闭部署拦截；命令内的 `DEPLOY_GATE=allow` 前缀声明已获用户授权。
+- `BANNED_WORDS`（`search-gate.js` 内常量）：禁用词表，改数组即生效。
 - `SLEEP_LIMIT`：sleep 秒数上限，默认 60。
 - 词法相关集合（`GREPS` / `WRAPPERS` / `SHELLS`）按需扩充；无其他可调参数。
 
@@ -49,12 +57,13 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 - 只拦「搜索」，不拦 Read（指名读文件永远自由）。
 - grep→rg 强制全局生效（含非编码目录）：工具路由教育，与目录场景无关。
 - eval/反引号等动态求值里的 grep 识别不了（轻量词法的边界）。
+- 部署拦截只认命令位置：`ssh host 'git push'`、脚本内部的部署动作不在拦截范围——目标是提示模型先拿到授权，不是防绕过。
 - sleep 时长只认字面量（`90`、`1m`、`1m30s`、`1.5h`）；参数是变量/命令替换时算不出，放行不管——上限针对的是模型随手写长 sleep，不是防绕过。
 - 后台 sleep（`&`）与循环内的 sleep 同样受单次上限约束；频繁短 sleep 不拦。
 
 ## 测试
 
-**自检（入库）：`node test-search-gate.js`** —— 22 用例，无框架无依赖（rg 缺失时强制类用例跳过）。用例组：
+**自检（入库）：`node test-search-gate.js`** —— 39 用例，无框架无依赖（rg 缺失时强制类用例跳过）。用例组：
 
 - J1-J5 grep→rg 强制（基础 / `/bin/grep` 全路径 / 全路径 egrep / `sh -c` 递归 / `git grep`）
 - G1 媒体目录路径下 grep 仍强制（全局生效）
@@ -62,6 +71,8 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 - J6-J8 不误拦（commit 消息里的 grep / 文件名 grep.py / 参数里的 rg）
 - J9-J10 rg 永远放行（全路径 rg / `sh -c` 里的 rg——v6 无首搜闸回归）
 - S1-S10 sleep 上限（`sleep 90` / `1m30s` / `sh -c` 递归 / wrapper 后；`sleep 60` 与短 sleep 放行；注释与提交消息里的时长不误拦；`SLEEP_GATE=allow` 与 `SLEEP_GATE=off` 放行）
+- D1-D10 部署拦截（push/merge/docker restart/scp/rsync 远程/allow 放行/本地 rsync 与 ssh 读操作不误拦/env off）
+- W1-W7 输出禁用词（两词分别拦截 / 干净放行 / 工具参数里的同名词不算输出 / 只看最后一条回答 / `WORDS_GATE=off` 放行 / 引用语境同样拦）
 
 **历史记录（旧版首搜闸的测试装置与实战，1.3.0 起不再适用）**：单元级 8 组 49 用例（全过）；headless `claude -p` 实战 3 轮（Windows 11 实机，rg 15.2.0 / node 24.19 / claude 2.1.282）。Round 2 完整走通 Grep 拦截 → 建图 7 步 → query 开闸 → 放行；Round 3 验证过期提醒 block-once。移除原因见上「项目定位」。
 
@@ -75,6 +86,8 @@ Claude Code 插件：marketplace 名 `my-workflow-marketplace`，插件名 `my-w
 
 ## 版本历史
 
+- 1.5.2（v6.3）：新增部署拦截——`git push`/`git merge`/`docker restart`/`scp`、`rsync` 远程目标/`deploy.sh` 默认打回，`DEPLOY_GATE=allow` 前缀或 `DEPLOY_GATE=off` 放行；新增 D1-D10（共 39 用例）。对应「对外变更需用户明确授权」的工作约定。
+- 1.5.0（v6.2）：新增输出禁用词——Stop 时扫最后一条回答文本，含 `BANNED_WORDS`（默认「抽屉」「值错位」）打回重答；hooks 增至 2 个（PreToolUse:Bash + Stop）；`WORDS_GATE=off` 单独关闭；新增 W1-W7（共 29 用例）。
 - 1.4.0（v6.1）：新增 sleep 上限——单次 sleep 超过 60 秒打回，`SLEEP_GATE=allow` 前缀声明精确等待；`SLEEP_GATE=off` 环境变量单独关闭；命令词法抽出 `walk` 复用；注释剥离；新增 S1-S10（共 22 用例）。对应规则从用户全局 CLAUDE.md 迁入插件，软硬双约束。
 - 1.3.0（v6）：删除首搜闸、图过期提醒及全部状态/资格/认图代码——「不建图就拦 rg」与「rg 优先」的检索约定冲突（实测文档评审场景被拦）。只留 grep→rg 强制，rg 永远放行；hooks 收敛为单个 PreToolUse(Bash)；测试 39 → 12 用例。
 - 1.2.3（v5.3）：命令位置词法解析——引号/参数里的 grep/rg/graphify 不再误拦，`/usr/bin/rg`、带引号 rg、全路径 graphify 不再漏拦；Glob 的 `path` 指向 graphify-out 时豁免；状态文件损坏不崩溃；已开闸目录跳过资格重扫；新增 F2/J5-J8/N10-N11（共 39 用例）。

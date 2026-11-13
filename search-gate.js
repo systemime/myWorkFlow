@@ -1,4 +1,6 @@
 // search-gate.js v6.2
+// v6.3: 新增部署拦截 —— git push/merge、docker restart、scp/rsync 远程目标、deploy.sh 默认打回;
+//       用户明确授权后命令前加 DEPLOY_GATE=allow 放行。
 // v6.2: 新增输出禁用词 —— Stop 时扫最后一条 assistant 回答文本, 含 BANNED_WORDS 即打回重答。
 // v6.1: 新增 sleep 上限 —— 除非能够精确计算 sleep 时间,否则单次 sleep 不能超过 60 秒。
 //       命令前加 SLEEP_GATE=allow 显式声明精确等待时才放行。
@@ -165,9 +167,44 @@ function oversleep(cmd, depth) {
   });
 }
 
+// ---------- 部署拦截: 推送/合并/远程部署属于对外变更, 需显式授权 ----------
+// 匹配范围保守: git push/merge、docker restart、scp/rsync 带远程目标、deploy.sh。
+// ssh 不拦 —— 日常查状态/读日志大量使用; 远程部署通常经 scp/rsync/deploy.sh 落地。
+function remoteTarget(words) {
+  for (let j = 1; j < words.length; j++) {
+    const w = words[j];
+    if (w.startsWith('-')) continue;
+    if (/^[^/\s]+@[^:]+:/.test(w) || /^[A-Za-z0-9._-]+:/.test(w)) return true;  // user@host:path / host:path
+  }
+  return false;
+}
+
+function deployCommand(cmd, depth) {
+  return walk(cmd, depth, (name, words, i) => {
+    // 授权例外: 命令前显式声明 DEPLOY_GATE=allow
+    for (let j = 0; j < i; j++) if (/^DEPLOY_GATE=allow$/i.test(words[j])) return false;
+    if (name === 'git') {
+      const sub = words.slice(i + 1).find((w) => !w.startsWith('-'));
+      return sub === 'push' || sub === 'merge';
+    }
+    if (name === 'docker') {
+      const sub = words.slice(i + 1).find((w) => !w.startsWith('-'));
+      return sub === 'restart';
+    }
+    if (name === 'scp' || name === 'rsync') return remoteTarget(words);
+    if (name === 'deploy.sh' || name === 'deploy-cdos.sh') return true;
+    return false;
+  });
+}
+
 // ---------- bash: grep→rg 强制(rg 永远放行, 无首搜闸) + sleep 上限 ----------
 if (mode === 'bash') {
   const cmd = (payload().tool_input || {}).command || '';
+  const deployOff = ['off', '0', 'false'].includes((process.env.DEPLOY_GATE || '').toLowerCase());
+  if (!deployOff && deployCommand(cmd, 0)) {
+    deny('Blocked: 推送、合并与远程部署属于对外变更，需用户明确授权后再执行。'
+      + '用户同意后，在命令前加 DEPLOY_GATE=allow 声明；用户未要求时先完成代码改动并等待通知。');
+  }
   const sleepOff = ['off', '0', 'false'].includes((process.env.SLEEP_GATE || '').toLowerCase());
   if (!sleepOff && oversleep(cmd, 0)) {
     deny('Blocked: 除非能够精确计算 sleep 时间，否则单次 sleep 时间不能超过 60 秒。'

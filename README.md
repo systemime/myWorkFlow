@@ -1,12 +1,13 @@
 # my-workflow
 
-Claude Code 插件：把「rg 替代 grep」的工具路由纪律、sleep 时长上限和输出禁用词从提示词软约束升级为 hook 硬约束。提示词只能「建议」，模型可以在任何一轮违背；本插件在 hook 层直接拦截，确定性保证行为。
+Claude Code 插件：把「rg 替代 grep」的检索约定、sleep 时长上限、输出禁用词和部署/合并授权边界从提示词软约束升级为 hook 硬约束。提示词只能「建议」，模型可以在任何一轮违背；本插件在 hook 层直接拦截，确定性保证行为。
 
 ## 功能
 
 - **rg 强制**：Bash 中的 grep / egrep / fgrep 一律打回改用 rg（含 `/bin/grep`、`sh -c 'grep …'` 等变体，以及 `git grep`、`find -exec grep`）；仅当 rg 不可用时自动放行 grep 兜底。
 - **rg 永远放行**：不要求建图、不要求任何前置步骤。文档评审等非编码任务零打扰。
 - **sleep 上限**：除非能够精确计算 sleep 时间，否则单次 sleep 时间不能超过 60 秒。超时打回，提示改用短 sleep 循环；确实需要精确等待更久时在命令前加 `SLEEP_GATE=allow`。
+- **部署拦截**：`git push` / `git merge` / `docker restart` / `scp`、`rsync` 带远程目标 / `deploy.sh` 默认打回——对外变更需用户明确授权；同意后在命令前加 `DEPLOY_GATE=allow`。`ssh` 查状态/读日志不受影响。
 - **输出禁用词**：回答文本中出现禁用词（与全局 CLAUDE.md 同步的完整表，21 个词；流程类易误报词留在软约束）时打回，要求删词后重答。只看最后一条回答：历史轮次不追打，工具参数里的同名词不算。
 - 命令里的同名词不误拦：`git commit -m "use grep"`、`python grep.py`、`echo rg` 照常执行。
 

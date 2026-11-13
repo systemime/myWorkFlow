@@ -1,7 +1,7 @@
 {
   "name": "my-workflow",
   "description": "Enforces rg over grep and a 60-second per-command sleep limit in Bash for Claude Code: grep/egrep/fgrep (incl. full paths, quoted and sh -c variants) are rejected with a prompt to use rg; automatic fallback when rg is absent. rg itself is never blocked. Single sleeps over 60 seconds are rejected unless preceded by SLEEP_GATE=allow. At Stop, replies containing banned words (default: 抽屉 / 值错位) are rejected and must be rewritten.",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "author": {
     "name": "OwO"
   }

@@ -8,8 +8,8 @@
     {
       "name": "my-workflow",
       "source": "./",
-      "description": "Forces rg over grep in Bash (incl. full-path/quoted/sh -c variants), automatic grep fallback when rg is absent; rejects single sleeps over 60 seconds unless SLEEP_GATE=allow is declared",
-      "version": "1.4.0"
+      "description": "Forces rg over grep in Bash (incl. full-path/quoted/sh -c variants), automatic grep fallback when rg is absent; rejects single sleeps over 60 seconds unless SLEEP_GATE=allow is declared; rejects replies containing banned words at Stop and asks for a rewrite",
+      "version": "1.5.2"
     }
   ]
 }
