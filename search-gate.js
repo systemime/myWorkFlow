@@ -1,4 +1,5 @@
-// search-gate.js v6.1
+// search-gate.js v6.2
+// v6.2: 新增输出禁用词 —— Stop 时扫最后一条 assistant 回答文本, 含 BANNED_WORDS 即打回重答。
 // v6.1: 新增 sleep 上限 —— 除非能够精确计算 sleep 时间,否则单次 sleep 不能超过 60 秒。
 //       命令前加 SLEEP_GATE=allow 显式声明精确等待时才放行。
 // v6: 删除首搜闸/图过期提醒 —— 「不建图就拦 rg」与 CLAUDE.md「rg 优先」直接冲突,
@@ -9,9 +10,11 @@
 //       /bin/grep、sh -c 'grep …' 等变体不漏拦(词法解析保留)。
 // bash → PreToolUse(Bash): grep/egrep/fgrep 一律打回换 rg; rg 缺失时放行兜底。
 //                         单次 sleep > 60 秒打回。
+// stop → Stop: 回答文本含禁用词时打回, 要求删词后重答(stop_hook_active 时不循环)。
 //
 // 环境变量 GRAPHIFY_GATE=off|0|false 时整个插件放行(CI / 无头场景逃生口)
 // 环境变量 SLEEP_GATE=off|0|false 时只关闭 sleep 上限
+// 环境变量 WORDS_GATE=off|0|false 时只关闭输出禁用词
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 
@@ -175,4 +178,43 @@ if (mode === 'bash') {
   }
 }
 
-allow();                                          // 未知 mode / 非检索命令 / rg 缺失: 放行
+// ---------- 输出禁用词: Stop 时扫最后一条回答, 含禁用词打回重答 ----------
+// 只扫最后一条 assistant 的 text 块: 历史轮次里的旧词不追打, 工具参数里的同名词不算输出
+// 与 ~/.claude/CLAUDE.md「禁用词」表同步（2026-11-13）。
+// 取舍：「闭环」「对齐」不进硬拦截——日常技术语境（版本对齐/流程闭环讨论）误报率高，留在软约束；
+// 其余绝对禁用词（任何语境）全部硬拦截。
+const BANNED_WORDS = [
+  '门禁', '契约', '种子', '播种', '豁免', '抽屉', '值错位',
+  '硬顶', '保险丝', '战役', '点火', '污染', '毒化', '幻影',
+  '老树', '纪律',
+  '赋能', '抓手', '颗粒度', '拉通', '沉淀',
+];
+const WORDS_OFF = ['off', '0', 'false'];
+
+// 从 transcript JSONL 里取最后一条 assistant 的文本(text 块); 读不到返回 null(放行兜底)
+function lastAssistantText(file) {
+  let lines;
+  try { lines = fs.readFileSync(file, 'utf8').split('\n'); } catch (e) { return null; }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry;
+    try { entry = JSON.parse(lines[i]); } catch (e) { continue; }   // 空行/写一半的行跳过
+    if (!entry || entry.type !== 'assistant' || !Array.isArray((entry.message || {}).content)) continue;
+    return entry.message.content.filter(b => b && b.type === 'text').map(b => b.text || '').join('\n');
+  }
+  return null;
+}
+
+if (mode === 'stop') {
+  const p = payload();
+  if (!WORDS_OFF.includes((process.env.WORDS_GATE || '').toLowerCase())
+      && p.transcript_path && !p.stop_hook_active) {
+    const text = lastAssistantText(p.transcript_path);
+    const found = text ? BANNED_WORDS.filter(w => text.includes(w)) : [];
+    if (found.length) {
+      deny('Blocked: 回答中出现禁用词「' + found.join('」「') + '」。'
+        + '删除这些词或换成直白说法，重新给出完整回答。');
+    }
+  }
+}
+
+allow();                                          // 未知 mode / 非检索命令 / 干净回答: 放行
